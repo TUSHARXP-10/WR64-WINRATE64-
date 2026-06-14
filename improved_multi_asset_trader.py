@@ -196,6 +196,8 @@ def get_current_position(client, symbol: str) -> dict | None:
 
 def calculate_position_size(client, symbol: str, entry_price: float, stop_loss: float, risk_per_trade: float) -> float:
     try:
+        import math
+        
         account = client.futures_account()
         balance = float([b for b in account["assets"] if b["asset"] == "USDT"][0]["walletBalance"])
         risk_amount = balance * risk_per_trade
@@ -215,8 +217,9 @@ def calculate_position_size(client, symbol: str, entry_price: float, stop_loss: 
         
         qty_precision = int(symbol_data["quantityPrecision"])
         
-        # Floor to the correct precision instead of round
-        position_size = float("{:.{}f}".format(position_size, qty_precision))
+        # Floor to the correct precision
+        multiplier = 10 ** qty_precision
+        position_size = math.floor(position_size * multiplier) / multiplier
         
         # Also make sure it's above the minimum order size
         min_order_size = float(symbol_data["filters"][2]["minQty"])
