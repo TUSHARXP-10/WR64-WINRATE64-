@@ -150,8 +150,8 @@ def calculate_position_size(client, symbol, entry_price, stop_loss, risk_per_tra
         
         position_size = (risk_amount / stop_distance) * 20  # 20x leverage
         
-        # Cap at 25% of max possible position per asset (to spread across 3 assets)
-        max_possible_size = (balance * 20 / entry_price) * 0.25
+        # Cap at 20% of max possible position per asset (to spread across 3 assets safely)
+        max_possible_size = (balance * 20 / entry_price) * 0.20
         position_size = min(position_size, max_possible_size)
         
         symbol_info = client.futures_exchange_info()
@@ -223,7 +223,7 @@ def main():
     INTERVAL = Client.KLINE_INTERVAL_1HOUR
     LOOKBACK = 100
     SLEEP_TIME = 60  # Check every minute
-    RISK_PER_TRADE = 0.015  # 1.5% risk per trade (smaller for multi-asset)
+    RISK_PER_TRADE = 0.01  # 1% risk per trade for multi-asset
     LEVERAGE = 20
     
     logging.info("="*80)
