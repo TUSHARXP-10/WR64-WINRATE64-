@@ -44,7 +44,7 @@ def signal(df, config):
     rsi = calculate_rsi(df, 14)
     
     # Track position and signals
-    pos = np.zeros(n)
+    pos = pd.Series(np.zeros(n), index=df.index)
     current_pos = 0
     entry_price = np.nan
     stop_loss = np.nan
@@ -83,7 +83,7 @@ def signal(df, config):
                 stop_loss = entry_price + (sl_buffer * entry_price)
                 take_profit = entry_price - (sl_buffer * entry_price * 1.9)
         
-        pos[i] = current_pos
+        pos.iloc[i] = current_pos
     
     return pos
 
