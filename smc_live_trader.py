@@ -39,8 +39,9 @@ client.WEBSITE_URL = 'https://testnet.binance.vision'
 SYMBOLS = ["BTCUSDT", "BNBUSDT", "ETHUSDT"]
 INTERVAL = Client.KLINE_INTERVAL_4HOUR  # SMC works better on higher timeframes
 LEVERAGE = 20
-RISK_PER_TRADE = 0.01  # 1% risk per trade
+RISK_PER_TRADE = 0.02  # 2% risk per trade (since $100 is small)
 CHECK_INTERVAL = 300  # Check every 5 minutes
+TOTAL_CAPITAL = 100.0  # Fixed $100 total capital
 
 # Global state to track open positions
 open_positions = {}
@@ -269,9 +270,8 @@ def get_account_balance() -> float:
 
 
 def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -> float:
-    """Calculate position size based on risk"""
-    balance = get_account_balance()
-    risk_amount = balance * RISK_PER_TRADE
+    """Calculate position size based on fixed $100 capital and risk"""
+    risk_amount = TOTAL_CAPITAL * RISK_PER_TRADE
     stop_distance = abs(entry_price - stop_loss)
     if stop_distance == 0:
         return 0.0
@@ -324,6 +324,11 @@ def open_position(symbol: str, side: str, stop_loss: float, take_profit: float):
     # Close existing position first if any
     if symbol in open_positions:
         close_position(symbol)
+    
+    # Only allow one open position total (to stay within $100 capital)
+    if len(open_positions) > 0:
+        logger.warning("Already have an open position, not opening another")
+        return
 
     # Get current price
     ticker = client.futures_symbol_ticker(symbol=symbol)
