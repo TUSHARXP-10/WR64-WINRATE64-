@@ -209,8 +209,20 @@ def calculate_position_size(client, symbol: str, entry_price: float, stop_loss: 
         position_size = min(position_size, max_possible_size)
         
         symbol_info = client.futures_exchange_info()
-        symbol_precision = next((s["quantityPrecision"] for s in symbol_info["symbols"] if s["symbol"] == symbol), 0)
-        position_size = round(position_size, symbol_precision)
+        symbol_data = next((s for s in symbol_info["symbols"] if s["symbol"] == symbol), None)
+        if not symbol_data:
+            return 0
+        
+        qty_precision = int(symbol_data["quantityPrecision"])
+        
+        # Floor to the correct precision instead of round
+        position_size = float("{:.{}f}".format(position_size, qty_precision))
+        
+        # Also make sure it's above the minimum order size
+        min_order_size = float(symbol_data["filters"][2]["minQty"])
+        if position_size < min_order_size:
+            position_size = min_order_size
+            
         return position_size
     except Exception as e:
         logging.error(f"Error calculating {symbol} position size: {e}")
