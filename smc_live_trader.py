@@ -1,7 +1,9 @@
+
 """
-SMC Live Trader - Version 3
+SMC Live Trader - Version 4
 Uses SMC (Smart Money Concepts) with FVG (Fair Value Gap) + candlestick patterns
 Includes all bug fixes: data chronology, order precision, connectivity
+Restored to backtested strategy parameters
 """
 import os
 import time
@@ -35,13 +37,13 @@ client.API_URL = 'https://testnet.binance.vision/api'
 client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 client.WEBSITE_URL = 'https://testnet.binance.vision'
 
-# Configuration
+# Configuration - RESTORED TO BACKTESTED SETTINGS!
 SYMBOLS = ["BTCUSDT", "BNBUSDT", "ETHUSDT"]
-INTERVAL = Client.KLINE_INTERVAL_5MINUTE  # Changed to 5min for way more signals!
+INTERVAL = Client.KLINE_INTERVAL_4HOUR  # BACKTESTED 4H!
 LEVERAGE = 20
-RISK_PER_TRADE = 0.01  # 1% risk per trade (original)
-CHECK_INTERVAL = 60  # Check every minute!
-TOTAL_CAPITAL = 5000.0  # Fixed $5000 total capital (back to original)
+RISK_PER_TRADE = 0.01  # 1% of total capital per trade
+CHECK_INTERVAL = 3600  # Check every hour (4H bars change every 4H)
+TOTAL_CAPITAL = 100.0  # $100 total capital as requested
 
 # Global state to track open positions
 open_positions = {}
@@ -82,7 +84,6 @@ def calculate_atr(df: pd.DataFrame, period: int = 14) -> np.ndarray:
 
 
 def _is_hammer(o, h, l, c, i):
-    """Check if current candle is a hammer"""
     rng = h[i] - l[i]
     if rng <= 0:
         return False
@@ -93,7 +94,6 @@ def _is_hammer(o, h, l, c, i):
 
 
 def _is_shooting_star(o, h, l, c, i):
-    """Check if current candle is a shooting star"""
     rng = h[i] - l[i]
     if rng <= 0:
         return False
@@ -104,17 +104,14 @@ def _is_shooting_star(o, h, l, c, i):
 
 
 def _is_bullish_engulfing(o, h, l, c, i):
-    """Check if current candle is bullish engulfing"""
     return c[i-1] < o[i-1] and c[i] > o[i] and c[i] >= o[i-1] and o[i] <= c[i-1]
 
 
 def _is_bearish_engulfing(o, h, l, c, i):
-    """Check if current candle is bearish engulfing"""
     return c[i-1] > o[i-1] and c[i] < o[i] and c[i] <= o[i-1] and o[i] >= c[i-1]
 
 
 def _is_three_white_soldiers(o, h, l, c, i):
-    """Check for three white soldiers pattern"""
     return (c[i-2] > o[i-2] and c[i-1] > o[i-1] and c[i] > o[i] and
             c[i] > c[i-1] > c[i-2] and
             o[i-1] > o[i-2] and o[i-1] < c[i-2] and
@@ -122,15 +119,14 @@ def _is_three_white_soldiers(o, h, l, c, i):
 
 
 def _is_three_black_crows(o, h, l, c, i):
-    """Check for three black crows pattern"""
     return (c[i-2] < o[i-2] and c[i-1] < o[i-1] and c[i] < o[i] and
             c[i] < c[i-1] < c[i-2] and
             o[i-1] < o[i-2] and o[i-1] > c[i-2] and
             o[i] < o[i-1] and o[i] > c[i-1])
 
 
-def get_historical_data(symbol: str, interval: str, lookback: int = 1000) -> pd.DataFrame:
-    """Get historical data with proper chronological order (oldest first)"""
+def get_historical_data(symbol: str, interval: str, lookback: int = 1000):
+    """Fetch historical klines from Binance futures API"""
     all_data = []
     end_time = None
     remaining_bars = lookback
@@ -154,7 +150,7 @@ def get_historical_data(symbol: str, interval: str, lookback: int = 1000) -> pd.
         remaining_bars -= len(response)
         end_time = response[0][0] - 1
 
-    # SORT by timestamp instead of reverse() to ensure oldest first
+    # Sort by timestamp (oldest first!) - CRITICAL FIX!
     all_data.sort(key=lambda k: k[0])
 
     df = pd.DataFrame(all_data, columns=[
@@ -162,14 +158,13 @@ def get_historical_data(symbol: str, interval: str, lookback: int = 1000) -> pd.
         "close_time", "quote_asset_volume", "number_of_trades",
         "taker_buy_base", "taker_buy_quote", "ignore"
     ])
-
     numeric_cols = ["open", "high", "low", "close", "volume"]
     df[numeric_cols] = df[numeric_cols].apply(pd.to_numeric)
-    return df
+    return df.reset_index(drop=True)
 
 
 def generate_smc_signal(df: pd.DataFrame) -> dict:
-    """Generate trading signal using SMC/FVG/Candlestick strategy - SUPER SIMPLE!"""
+    """Generate trading signal using SMC/FVG/Candlestick strategy - RESTORED TO BACKTESTED SETTINGS!"""
     o = df["open"].values
     h = df["high"].values
     l = df["low"].values
@@ -182,7 +177,7 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
 
     bull_zones = []  # (bottom, top, created_idx)
     bear_zones = []
-    fvg_lookback = 40  # Increased to 40 bars
+    fvg_lookback = 30
     fvg_min_atr = 0.0
     sweep_lookback = 0
 
@@ -204,32 +199,28 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
     bull_bias = ema_fast[i] > ema_slow[i]
     bear_bias = ema_fast[i] < ema_slow[i]
 
-    # Check if price is in ANY FVG zone (check high/low too, not just close)
-    in_bull_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in bull_zones)
-    in_bear_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in bear_zones)
+    # Check if price is in FVG - BACKTESTED CHECK (close only)
+    in_bull_zone = any(z[0] <= c[i] <= z[1] for z in bull_zones)
+    in_bear_zone = any(z[0] <= c[i] <= z[1] for z in bear_zones)
 
-    # SUPER SIMPLE PATTERN CHECK: Bullish = close > open, Bearish = close < open
-    bull_pattern = c[i] > o[i]
-    bear_pattern = c[i] < o[i]
+    # BACKTESTED CANDLESTICK PATTERNS!
+    bull_pattern = (_is_hammer(o, h, l, c, i) or
+                    _is_bullish_engulfing(o, h, l, c, i) or
+                    _is_three_white_soldiers(o, h, l, c, i))
+    bear_pattern = (_is_shooting_star(o, h, l, c, i) or
+                    _is_bearish_engulfing(o, h, l, c, i) or
+                    _is_three_black_crows(o, h, l, c, i))
 
     swept_low = swept_high = True
     if sweep_lookback > 0:
         swept_low = l[i] < np.min(l[i-sweep_lookback:i])
         swept_high = h[i] > np.max(h[i-sweep_lookback:i])
 
-    # DEBUG LOGGING
-    logger.info(f"DEBUG: EMA Fast={ema_fast[i]:.2f}, EMA Slow={ema_slow[i]:.2f}")
-    logger.info(f"DEBUG: Bull Bias={bull_bias}, Bear Bias={bear_bias}")
-    logger.info(f"DEBUG: Bull Zones={len(bull_zones)}, Bear Zones={len(bear_zones)}")
-    logger.info(f"DEBUG: In Bull Zone={in_bull_zone}, In Bear Zone={in_bear_zone}")
-    logger.info(f"DEBUG: Bull Pattern={bull_pattern}, Bear Pattern={bear_pattern}")
-
     signal = {"signal": "hold", "stop_loss": None, "take_profit": None}
     sl_atr = 1.0
-    tp_atr = 2.0  # Tighter TP for more wins
+    tp_atr = 2.5  # BACKTESTED 2.5x ATR TP!
 
     if bull_bias and in_bull_zone and bull_pattern and swept_low:
-        logger.info("DEBUG: LONG SIGNAL TRIGGERED!")
         signal["signal"] = "long"
         entry = c[i]
         stop_loss = min(l[i], l[i-1]) - 0.1 * atr[i]
@@ -238,7 +229,6 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
         signal["stop_loss"] = stop_loss
         signal["take_profit"] = entry + tp_atr * atr[i]
     elif bear_bias and in_bear_zone and bear_pattern and swept_high:
-        logger.info("DEBUG: SHORT SIGNAL TRIGGERED!")
         signal["signal"] = "short"
         entry = c[i]
         stop_loss = max(h[i], h[i-1]) + 0.1 * atr[i]
@@ -278,10 +268,14 @@ def get_account_balance() -> float:
 
 
 def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -> float:
-    """Calculate position size based on fixed $100 per trade"""
-    # Fixed $100 per trade (not using leverage for this calculation)
-    position_size_usd = 100.0
-    position_size = position_size_usd / entry_price
+    """Calculate position size based on RISK (1% of $100 total capital) - RESTORED TO PROPER RISK-BASED SIZING!"""
+    risk_amount = TOTAL_CAPITAL * RISK_PER_TRADE
+    stop_distance = abs(entry_price - stop_loss)
+    if stop_distance == 0:
+        return 0.0
+
+    # Calculate position size (units of base asset)
+    position_size = (risk_amount / stop_distance) / LEVERAGE  # Apply leverage for position sizing
 
     # Round to correct precision
     return round_quantity(symbol, position_size)
@@ -343,6 +337,9 @@ def open_position(symbol: str, side: str, stop_loss: float, take_profit: float):
         logger.warning(f"Position size too small for {symbol}")
         return
 
+    # Calculate position size in USD
+    position_size_usd = quantity * entry_price
+
     # Open position
     order_side = Client.SIDE_BUY if side == 'long' else Client.SIDE_SELL
 
@@ -372,8 +369,6 @@ def open_position(symbol: str, side: str, stop_loss: float, take_profit: float):
             closePosition=True
         )
 
-        # Calculate position size in USD
-        position_size_usd = quantity * entry_price
         logger.info(f"Opened {side} position for {symbol}: {quantity} contracts, ${position_size_usd:.2f} at {entry_price}, SL={stop_loss}, TP={take_profit}")
         open_positions[symbol] = {
             'side': side,
@@ -394,8 +389,9 @@ def main():
     args = parser.parse_args()
 
     logger.info("="*64)
-    logger.info("SMC Live Trader - Version 3 Starting")
+    logger.info("SMC Live Trader - Version 4 (RESTORED TO BACKTESTED SETTINGS!)")
     logger.info(f"Symbols: {SYMBOLS}, Interval: {INTERVAL}, Leverage: {LEVERAGE}x")
+    logger.info(f"Total Capital: ${TOTAL_CAPITAL:.2f}, Risk per Trade: {RISK_PER_TRADE*100:.0f}%")
     logger.info("="*64)
 
     # Set leverage for all symbols
@@ -436,35 +432,35 @@ def main():
             if current_pos:
                 logger.info(f"Current position: {current_pos['side']} @ {current_pos['entry_price']}, PnL: ${current_pos['unrealized_pnl']:.2f}")
                 # Check if we need to close (opposite signal)
-                if (current_pos['side'] == 'long' and signal['signal'] == 'short') or \
-                   (current_pos['side'] == 'short' and signal['signal'] == 'long'):
-                    logger.info(f"Opposite signal detected, closing position for {symbol}")
+                if (signal['signal'] == 'long' and current_pos['side'] == 'short') or \
+                   (signal['signal'] == 'short' and current_pos['side'] == 'long'):
                     close_position(symbol)
             else:
                 logger.info("No current position")
-                # Open new position if we have a signal
-                if signal['signal'] in ['long', 'short']:
-                    logger.info(f"Signal: {signal['signal']}, SL: {signal['stop_loss']:.2f}, TP: {signal['take_profit']:.2f}")
-                    open_position(symbol, signal['signal'], signal['stop_loss'], signal['take_profit'])
-                else:
-                    logger.info("No trading signal")
 
+            if signal['signal'] != 'hold':
+                logger.info(f"Signal: {signal['signal']}, SL: {signal['stop_loss']}, TP: {signal['take_profit']}")
+                if symbol not in open_positions:
+                    open_position(symbol, signal['signal'], signal['stop_loss'], signal['take_profit'])
+            else:
+                logger.info("No trading signal")
+
+    # If --one-check flag, run once and exit
     if args.one_check:
         run_market_check()
-        logger.info("One check complete, exiting.")
         return
 
+    # Otherwise, run continuously
     while True:
         try:
             run_market_check()
-            # Sleep until next check
             logger.info(f"\nWaiting {CHECK_INTERVAL} seconds until next check...")
             time.sleep(CHECK_INTERVAL)
-
         except Exception as e:
-            logger.error(f"Main loop error: {e}")
+            logger.error(f"Error in main loop: {e}")
             time.sleep(60)
 
 
 if __name__ == "__main__":
     main()
+
