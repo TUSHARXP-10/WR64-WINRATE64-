@@ -208,36 +208,37 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
     in_bull_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in bull_zones)
     in_bear_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in bear_zones)
 
-    # More lenient bull/bear patterns (check last 3 bars!)
+    # Super lenient bull/bear patterns (check last 5 bars!)
     bull_pattern = False
     bear_pattern = False
-    for offset in range(0, 3):
+    for offset in range(0, 5):
         k = i - offset
-        if k < 2:
+        if k < 1:
             continue
         
-        # Lenient hammer
+        # Super lenient hammer/shooting star
         body_size = abs(c[k] - o[k])
         total_range = h[k] - l[k]
-        lower_wick = min(o[k], c[k]) - l[k]
-        upper_wick = h[k] - max(o[k], c[k])
-        if total_range > 0 and lower_wick >= body_size * 1.2 and upper_wick <= body_size * 0.5:
-            bull_pattern = True
-            break
-        
-        # Lenient shooting star
-        if total_range > 0 and upper_wick >= body_size * 1.2 and lower_wick <= body_size * 0.5:
-            bear_pattern = True
-            break
-        
-        # Lenient engulfing
-        if k >= 1:
-            # Bullish engulfing
-            if c[k] > o[k] and c[k-1] < o[k-1] and o[k] <= c[k-1] and c[k] >= o[k-1]:
+        if total_range > 0:
+            lower_wick = min(o[k], c[k]) - l[k]
+            upper_wick = h[k] - max(o[k], c[k])
+            # Bullish pattern (more lower wick)
+            if lower_wick >= body_size * 0.8:
                 bull_pattern = True
                 break
-            # Bearish engulfing
-            if c[k] < o[k] and c[k-1] > o[k-1] and o[k] >= c[k-1] and c[k] <= o[k-1]:
+            # Bearish pattern (more upper wick)
+            if upper_wick >= body_size * 0.8:
+                bear_pattern = True
+                break
+        
+        # Super lenient engulfing
+        if k >= 1:
+            # Bullish engulfing (any close > open, previous close < open)
+            if c[k] > o[k] and c[k-1] < o[k-1]:
+                bull_pattern = True
+                break
+            # Bearish engulfing (any close < open, previous close > open)
+            if c[k] < o[k] and c[k-1] > o[k-1]:
                 bear_pattern = True
                 break
 
@@ -246,11 +247,19 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
         swept_low = l[i] < np.min(l[i-sweep_lookback:i])
         swept_high = h[i] > np.max(h[i-sweep_lookback:i])
 
+    # DEBUG LOGGING
+    logger.info(f"DEBUG: EMA Fast={ema_fast[i]:.2f}, EMA Slow={ema_slow[i]:.2f}")
+    logger.info(f"DEBUG: Bull Bias={bull_bias}, Bear Bias={bear_bias}")
+    logger.info(f"DEBUG: Bull Zones={len(bull_zones)}, Bear Zones={len(bear_zones)}")
+    logger.info(f"DEBUG: In Bull Zone={in_bull_zone}, In Bear Zone={in_bear_zone}")
+    logger.info(f"DEBUG: Bull Pattern={bull_pattern}, Bear Pattern={bear_pattern}")
+
     signal = {"signal": "hold", "stop_loss": None, "take_profit": None}
     sl_atr = 1.0
     tp_atr = 2.0  # Tighter TP for more wins
 
     if bull_bias and in_bull_zone and bull_pattern and swept_low:
+        logger.info("DEBUG: LONG SIGNAL TRIGGERED!")
         signal["signal"] = "long"
         entry = c[i]
         stop_loss = min(l[i], l[i-1]) - 0.1 * atr[i]
@@ -259,6 +268,7 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
         signal["stop_loss"] = stop_loss
         signal["take_profit"] = entry + tp_atr * atr[i]
     elif bear_bias and in_bear_zone and bear_pattern and swept_high:
+        logger.info("DEBUG: SHORT SIGNAL TRIGGERED!")
         signal["signal"] = "short"
         entry = c[i]
         stop_loss = max(h[i], h[i-1]) + 0.1 * atr[i]
@@ -339,7 +349,7 @@ def close_position(symbol: str):
     client.futures_create_order(
         symbol=symbol,
         side=side,
-        type=Client.ORDER_TYPE_MARKET,
+        type='MARKET',
         quantity=quantity
     )
 
@@ -374,7 +384,7 @@ def open_position(symbol: str, side: str, stop_loss: float, take_profit: float):
         client.futures_create_order(
             symbol=symbol,
             side=order_side,
-            type=Client.ORDER_TYPE_MARKET,
+            type='MARKET',
             quantity=quantity
         )
 
@@ -383,7 +393,7 @@ def open_position(symbol: str, side: str, stop_loss: float, take_profit: float):
         client.futures_create_order(
             symbol=symbol,
             side=stop_side,
-            type=Client.ORDER_TYPE_STOP_MARKET,
+            type='STOP_MARKET',
             stopPrice=stop_loss,
             closePosition=True
         )
@@ -391,7 +401,7 @@ def open_position(symbol: str, side: str, stop_loss: float, take_profit: float):
         client.futures_create_order(
             symbol=symbol,
             side=stop_side,
-            type=Client.ORDER_TYPE_TAKE_PROFIT_MARKET,
+            type='TAKE_PROFIT_MARKET',
             stopPrice=take_profit,
             closePosition=True
         )

@@ -1,5 +1,5 @@
 
-"""SUPER DETAILED DEBUG of SMC Strategy - LENIENT!"""
+"""SUPER DETAILED DEBUG of SMC Strategy - SUPER LENIENT!"""
 import os
 import sys
 import numpy as np
@@ -24,7 +24,7 @@ client.API_URL = 'https://testnet.binance.vision/api'
 client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
 client.WEBSITE_URL = 'https://testnet.binance.vision'
 
-# Configuration (LENIENT!)
+# Configuration (SUPER LENIENT!)
 INTERVAL = Client.KLINE_INTERVAL_1HOUR
 LOOKBACK = 1000
 ATR_PERIOD = 14
@@ -35,8 +35,6 @@ SL_ATR = 1.0
 TP_ATR = 2.0
 FVG_MIN_ATR = 0.0
 SWEEP_LOOKBACK = 0
-TOTAL_CAPITAL = 5000.0  # Back to $5000
-RISK_PER_TRADE = 0.01  # 1% risk
 
 def get_historical_data(symbol, interval, lookback):
     all_data = []
@@ -110,82 +108,88 @@ def debug_strategy(df, symbol):
         current_bull_zones = [z for z in bull_zones if i - z[2] <= FVG_LOOKBACK]
         current_bear_zones = [z for z in bear_zones if i - z[2] <= FVG_LOOKBACK]
 
-        # Step 2: Check for new entry if no position
-        if current_pos == 0:
-            bull_bias = ema_fast[i] > ema_slow[i]
-            bear_bias = ema_fast[i] < ema_slow[i]
-            
-            # Check if price is in FVG (anywhere in bar)
-            in_bull_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in current_bull_zones)
-            in_bear_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in current_bear_zones)
+        # Skip if in position
+        if current_pos != 0:
+            continue
 
-            # Check lenient patterns (last 3 bars)
-            bull_pattern = False
-            bear_pattern = False
-            for offset in range(0, 3):
-                k = i - offset
-                if k < 2:
-                    continue
-                
-                # Lenient hammer/shooting star
-                body_size = abs(c[k] - o[k])
-                total_range = h[k] - l[k]
+        # Calculate signal conditions
+        bull_bias = ema_fast[i] > ema_slow[i]
+        bear_bias = ema_fast[i] < ema_slow[i]
+
+        # Check if price is in FVG (anywhere in bar)
+        in_bull_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in current_bull_zones)
+        in_bear_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in current_bear_zones)
+
+        # SUPER lenient bull/bear patterns (check last 5 bars!)
+        bull_pattern = False
+        bear_pattern = False
+        for offset in range(0, 5):
+            k = i - offset
+            if k < 1:
+                continue
+            
+            # Super lenient hammer/shooting star
+            body_size = abs(c[k] - o[k])
+            total_range = h[k] - l[k]
+            if total_range > 0:
                 lower_wick = min(o[k], c[k]) - l[k]
                 upper_wick = h[k] - max(o[k], c[k])
-                
-                if total_range > 0:
-                    if lower_wick >= body_size * 1.2 and upper_wick <= body_size * 0.5:
-                        bull_pattern = True
-                        break
-                    if upper_wick >= body_size * 1.2 and lower_wick <= body_size * 0.5:
-                        bear_pattern = True
-                        break
-                
-                # Lenient engulfing
-                if k >= 1:
-                    if c[k] > o[k] and c[k-1] < o[k-1] and o[k] <= c[k-1] and c[k] >= o[k-1]:
-                        bull_pattern = True
-                        break
-                    if c[k] < o[k] and c[k-1] > o[k-1] and o[k] >= c[k-1] and c[k] <= o[k-1]:
-                        bear_pattern = True
-                        break
+                # Bullish pattern (more lower wick)
+                if lower_wick >= body_size * 0.8:
+                    bull_pattern = True
+                    break
+                # Bearish pattern (more upper wick)
+                if upper_wick >= body_size * 0.8:
+                    bear_pattern = True
+                    break
+            
+            # Super lenient engulfing
+            if k >= 1:
+                # Bullish engulfing (any close > open, previous close < open)
+                if c[k] > o[k] and c[k-1] < o[k-1]:
+                    bull_pattern = True
+                    break
+                # Bearish engulfing (any close < open, previous close > open)
+                if c[k] < o[k] and c[k-1] > o[k-1]:
+                    bear_pattern = True
+                    break
 
-            swept_low = swept_high = True
+        swept_low = swept_high = True
 
-            # Print current bar info
-            print(f"\n--- Bar {i} | Price: O={o[i]:.2f}, H={h[i]:.2f}, L={l[i]:.2f}, C={c[i]:.2f}")
-            print(f"    EMA Fast/Slow: {ema_fast[i]:.2f} / {ema_slow[i]:.2f} | Bias: {'BULL' if bull_bias else 'BEAR' if bear_bias else 'NONE'}")
-            print(f"    ATR: {atr[i]:.2f}")
-            print(f"    FVG ZONES - Bull: {len(current_bull_zones)}, Bear: {len(current_bear_zones)}")
-            print(f"    In Bull FVG: {in_bull_zone}, In Bear FVG: {in_bear_zone}")
-            print(f"    Patterns - Bull: {bull_pattern}, Bear: {bear_pattern}")
-            print(f"    Full Signal Check:")
-            print(f"      LONG?: BullBias={bull_bias} AND InBullZone={in_bull_zone} AND BullPattern={bull_pattern} = {bull_bias and in_bull_zone and bull_pattern}")
-            print(f"      SHORT?: BearBias={bear_bias} AND InBearZone={in_bear_zone} AND BearPattern={bear_pattern} = {bear_bias and in_bear_zone and bear_pattern}")
+        # Print current bar info
+        print(f"\n--- Bar {i} | Price: O={o[i]:.2f}, H={h[i]:.2f}, L={l[i]:.2f}, C={c[i]:.2f}")
+        print(f"    EMA Fast/Slow: {ema_fast[i]:.2f} / {ema_slow[i]:.2f} | Bias: {'BULL' if bull_bias else 'BEAR' if bear_bias else 'NONE'}")
+        print(f"    ATR: {atr[i]:.2f}")
+        print(f"    FVG Zones - Bull: {len(current_bull_zones)}, Bear: {len(current_bear_zones)}")
+        print(f"    In Bull Zone: {in_bull_zone}, In Bear Zone: {in_bear_zone}")
+        print(f"    Patterns - Bull: {bull_pattern}, Bear: {bear_pattern}")
+        print(f"    Full Signal Check:")
+        print(f"      LONG?: BullBias={bull_bias} AND InBullZone={in_bull_zone} AND BullPattern={bull_pattern} = {bull_bias and in_bull_zone and bull_pattern}")
+        print(f"      SHORT?: BearBias={bear_bias} AND InBearZone={in_bear_zone} AND BearPattern={bear_pattern} = {bear_bias and in_bear_zone and bear_pattern}")
 
-            # Check for actual signal
-            if bull_bias and in_bull_zone and bull_pattern and swept_low:
-                print(f"\n{'!'*60}")
-                print(f"!!! LONG SIGNAL AT BAR {i} !!!")
-                entry = c[i]
-                stop_loss = min(l[i], l[i-1]) - 0.1 * atr[i]
-                if stop_loss >= entry:
-                    stop_loss = entry - SL_ATR * atr[i]
-                take_profit = entry + TP_ATR * atr[i]
-                print(f"Entry: {entry:.2f}, Stop: {stop_loss:.2f}, TP: {take_profit:.2f}")
-                print(f"{'!'*60}\n")
-                current_pos = 1
-            elif bear_bias and in_bear_zone and bear_pattern and swept_high:
-                print(f"\n{'!'*60}")
-                print(f"!!! SHORT SIGNAL AT BAR {i} !!!")
-                entry = c[i]
-                stop_loss = max(h[i], h[i-1]) + 0.1 * atr[i]
-                if stop_loss <= entry:
-                    stop_loss = entry + SL_ATR * atr[i]
-                take_profit = entry - TP_ATR * atr[i]
-                print(f"Entry: {entry:.2f}, Stop: {stop_loss:.2f}, TP: {take_profit:.2f}")
-                print(f"{'!'*60}\n")
-                current_pos = -1
+        # Check for actual signal
+        if bull_bias and in_bull_zone and bull_pattern and swept_low:
+            print(f"\n{'!'*60}")
+            print(f"!!! LONG SIGNAL AT BAR {i} !!!")
+            entry = c[i]
+            stop_loss = min(l[i], l[i-1]) - 0.1 * atr[i]
+            if stop_loss >= entry:
+                stop_loss = entry - SL_ATR * atr[i]
+            take_profit = entry + TP_ATR * atr[i]
+            print(f"Entry: {entry:.2f}, Stop: {stop_loss:.2f}, TP: {take_profit:.2f}")
+            print(f"{'!'*60}\n")
+            current_pos = 1
+        elif bear_bias and in_bear_zone and bear_pattern and swept_high:
+            print(f"\n{'!'*60}")
+            print(f"!!! SHORT SIGNAL AT BAR {i} !!!")
+            entry = c[i]
+            stop_loss = max(h[i], h[i-1]) + 0.1 * atr[i]
+            if stop_loss <= entry:
+                stop_loss = entry + SL_ATR * atr[i]
+            take_profit = entry - TP_ATR * atr[i]
+            print(f"Entry: {entry:.2f}, Stop: {stop_loss:.2f}, TP: {take_profit:.2f}")
+            print(f"{'!'*60}\n")
+            current_pos = -1
 
     print(f"\n--- Final Position: {'LONG' if current_pos == 1 else 'SHORT' if current_pos == -1 else 'NONE'} ---")
 
