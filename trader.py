@@ -78,14 +78,14 @@ def get_liquidation_buffer(config):
 
 def signal(df, config):
     """
-    Original Strategy from btc_backtest.py - Optimized trend-following!
+    Adjusted Strategy for Binance Testnet - Uses EMA 20/50 instead of 20/300!
     """
     close = df["close"].values
     n = len(df)
     
     # Calculate indicators
     ema20 = calculate_ema(close, 20)
-    ema300 = calculate_ema(close, 300)
+    ema50 = calculate_ema(close, 50)
     atr = calculate_atr(df, 14)
     rsi = calculate_rsi(df, 14)
     
@@ -96,7 +96,7 @@ def signal(df, config):
     stop_loss = np.nan
     take_profit = np.nan
     
-    for i in range(300, n):
+    for i in range(50, n):
         # First check if we need to exit current position
         if current_pos != 0:
             if current_pos == 1:  # Long position
@@ -114,8 +114,8 @@ def signal(df, config):
         
         # If flat, look for new entry
         if current_pos == 0:
-            # Long entry: uptrend (close > EMA300), EMA20 crossover with confirmation
-            if (close[i] > ema300[i] and
+            # Long entry: uptrend (close > EMA50), EMA20 crossover with confirmation
+            if (close[i] > ema50[i] and
                 ema20[i] > ema20[i-1] and
                 close[i] > (ema20[i] + 0.3 * atr[i]) and
                 close[i-1] <= ema20[i-1] and
@@ -124,8 +124,8 @@ def signal(df, config):
                 entry_price = close[i]
                 stop_loss = entry_price - (0.7 * atr[i])  # Tight SL
                 take_profit = entry_price + (2.1 * atr[i])  # 3:1 R:R
-            # Short entry: downtrend (close < EMA300), EMA20 crossunder with confirmation
-            elif (close[i] < ema300[i] and
+            # Short entry: downtrend (close < EMA50), EMA20 crossunder with confirmation
+            elif (close[i] < ema50[i] and
                   ema20[i] < ema20[i-1] and
                   close[i] < (ema20[i] - 0.3 * atr[i]) and
                   close[i-1] >= ema20[i-1] and
@@ -153,7 +153,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Strategy configuration (matches btc_backtest.py defaults)
+# Strategy configuration (adjusted for Binance Testnet)
 CONFIG = {
     'leverage': 20,
     'maint_margin': 0.005,
@@ -161,7 +161,7 @@ CONFIG = {
     'risk_per_trade': 0.05,  # 5% risk per trade
     'symbol': 'BTCUSDT',
     'interval': Client.KLINE_INTERVAL_1HOUR,
-    'lookback': 350,  # Need enough data for EMA300
+    'lookback': 100,  # Need enough data for EMA20/50
     'sleep_time': 300,  # Check every 5 minutes (300 seconds)
 }
 
@@ -173,14 +173,34 @@ client = Client(
 )
 
 def get_historical_data(symbol, interval, lookback):
-    """Fetch historical klines from Binance Testnet"""
-    klines = client.get_klines(
-        symbol=symbol,
-        interval=interval,
-        limit=lookback
-    )
-    
-    df = pd.DataFrame(klines, columns=[
+    """Fetch historical klines from Binance Testnet with pagination"""
+    all_data = []
+    end_time = None
+    remaining_bars = lookback
+    max_limit_per_request = 1000
+
+    while remaining_bars > 0:
+        limit = min(remaining_bars, max_limit_per_request)
+        params = {
+            "symbol": symbol,
+            "interval": interval,
+            "limit": limit
+        }
+        if end_time is not None:
+            params["endTime"] = end_time
+
+        klines = client.get_klines(**params)
+        
+        if not klines:
+            break
+        
+        all_data.extend(klines)
+        remaining_bars -= len(klines)
+        end_time = klines[0][0] - 1
+
+    all_data.reverse()
+
+    df = pd.DataFrame(all_data, columns=[
         'timestamp', 'open', 'high', 'low', 'close', 'volume',
         'close_time', 'quote_volume', 'trades', 'taker_buy_base',
         'taker_buy_quote', 'ignore'
@@ -302,9 +322,10 @@ def main():
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             logger.info(f"\nChecking market at {current_time}")
             
-            # Step 1: Fetch historical data (need 350 for EMA300)
+            # Step 1: Fetch historical data (need 100 for EMA20/50)
             df = get_historical_data(CONFIG['symbol'], CONFIG['interval'], CONFIG['lookback'])
-            if len(df) < CONFIG['lookback']:
+            logger.info(f"Fetched {len(df)} klines")
+            if len(df) < 50:  # Only need 50 for EMA50
                 logger.warning("Not enough data, waiting...")
                 time.sleep(CONFIG['sleep_time'])
                 continue
