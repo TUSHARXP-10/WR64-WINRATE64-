@@ -6,11 +6,19 @@ import os
 import time
 import logging
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 from dotenv import load_dotenv
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceOrderException
 import pandas as pd
 import numpy as np
+
+def round_price(client, symbol: str, price: float) -> float:
+    """Round a price to the symbol's allowed tick size (avoids -1111 precision errors)"""
+    info = client.futures_exchange_info()
+    symbol_info = next((s for s in info["symbols"] if s["symbol"] == symbol), None)
+    tick_size = next(f["tickSize"] for f in symbol_info["filters"] if f["filterType"] == "PRICE_FILTER")
+    return float(Decimal(str(price)).quantize(Decimal(tick_size), rounding=ROUND_HALF_UP))
 
 # Helper functions (EXACT FROM btc_backtest.py)
 def calculate_ema(data: np.ndarray, period: int) -> np.ndarray:
@@ -174,7 +182,7 @@ def get_historical_data(client, symbol: str, interval: str, lookback: int) -> pd
         remaining_bars -= len(klines)
         end_time = klines[0][0] - 1
 
-    all_data.reverse()
+    all_data.sort(key=lambda k: k[0])  # ensure ascending (oldest -> newest) order
 
     df = pd.DataFrame(all_data, columns=[
         "timestamp", "open", "high", "low", "close", "volume",
@@ -236,7 +244,7 @@ def enter_position(client, symbol: str, side: str, entry_price: float, stop_loss
     """Enter a new position"""
     try:
         client.futures_change_leverage(symbol=symbol, leverage=20)
-        
+
         order = client.futures_create_order(
             symbol=symbol,
             side=side,
@@ -244,7 +252,10 @@ def enter_position(client, symbol: str, side: str, entry_price: float, stop_loss
             quantity=position_size
         )
         logging.info(f"=== {symbol} ORDER PLACED: {side} {position_size} @ ~{entry_price:.2f} ===")
-        
+
+        stop_loss = round_price(client, symbol, stop_loss)
+        take_profit = round_price(client, symbol, take_profit)
+
         sl_order = client.futures_create_order(
             symbol=symbol,
             side="SELL" if side == Client.SIDE_BUY else "BUY",
@@ -287,6 +298,10 @@ def main():
         api_secret=os.getenv("BINANCE_TESTNET_API_SECRET"),
         testnet=True
     )
+    # Explicitly set correct testnet endpoints
+    client.API_URL = 'https://testnet.binance.vision/api'
+    client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
+    client.WEBSITE_URL = 'https://testnet.binance.vision'
     
     # Configuration
     SYMBOLS = ["BTCUSDT", "BNBUSDT", "ETHUSDT"]

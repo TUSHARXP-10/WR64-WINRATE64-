@@ -6,11 +6,19 @@ import os
 import time
 import logging
 from datetime import datetime
+from decimal import Decimal, ROUND_HALF_UP
 from dotenv import load_dotenv
 from binance.client import Client
 from binance.exceptions import BinanceAPIException, BinanceOrderException
 import pandas as pd
 import numpy as np
+
+def round_price(client, symbol: str, price: float) -> float:
+    """Round a price to the symbol's allowed tick size (avoids -1111 precision errors)"""
+    info = client.futures_exchange_info()
+    symbol_info = next((s for s in info["symbols"] if s["symbol"] == symbol), None)
+    tick_size = next(f["tickSize"] for f in symbol_info["filters"] if f["filterType"] == "PRICE_FILTER")
+    return float(Decimal(str(price)).quantize(Decimal(tick_size), rounding=ROUND_HALF_UP))
 
 # Helper functions
 def calculate_ema(data, period):
@@ -126,6 +134,10 @@ client = Client(
     api_secret=os.getenv('BINANCE_TESTNET_API_SECRET'),
     testnet=True
 )
+# Explicitly set correct testnet endpoints
+client.API_URL = 'https://testnet.binance.vision/api'
+client.FUTURES_URL = 'https://testnet.binancefuture.com/fapi'
+client.WEBSITE_URL = 'https://testnet.binance.vision'
 
 def get_historical_data(symbol, interval, lookback):
     """Fetch historical klines from Binance Testnet with pagination"""
@@ -144,7 +156,7 @@ def get_historical_data(symbol, interval, lookback):
         if end_time is not None:
             params["endTime"] = end_time
 
-        klines = client.get_klines(**params)
+        klines = client.futures_klines(**params)
         
         if not klines:
             break
@@ -153,7 +165,7 @@ def get_historical_data(symbol, interval, lookback):
         remaining_bars -= len(klines)
         end_time = klines[0][0] - 1
 
-    all_data.reverse()
+    all_data.sort(key=lambda k: k[0])  # ensure ascending (oldest -> newest) order
 
     df = pd.DataFrame(all_data, columns=[
         'timestamp', 'open', 'high', 'low', 'close', 'volume',
@@ -227,7 +239,10 @@ def enter_position(symbol, side, entry_price, stop_loss, take_profit, position_s
             quantity=position_size
         )
         logger.info(f"ENTRY ORDER PLACED: {side} {position_size} {symbol} at ~{entry_price}")
-        
+
+        stop_loss = round_price(client, symbol, stop_loss)
+        take_profit = round_price(client, symbol, take_profit)
+
         sl_order = client.futures_create_order(
             symbol=symbol,
             side='SELL' if side == Client.SIDE_BUY else 'BUY',

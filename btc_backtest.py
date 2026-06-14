@@ -152,7 +152,7 @@ def fetch_binance_ohlcv(symbol: str = "BTCUSDT", interval: str = "1h",
         remaining_bars -= len(batch_data)
         end_time = batch_data[0][0] - 1  # Get earliest timestamp for older data
 
-    all_data.reverse()
+    all_data.sort(key=lambda k: k[0])  # ensure ascending (oldest -> newest) order
 
     df = pd.DataFrame(all_data, columns=[
         "timestamp", "open", "high", "low", "close", "volume",
