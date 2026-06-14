@@ -192,11 +192,13 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
 
     i = n - 1  # Current candle (latest)
 
-    # Update FVG zones
-    if l[i] > h[i - 2] and (l[i] - h[i - 2]) >= fvg_min_atr * atr[i]:
-        bull_zones.append((h[i - 2], l[i], i))
-    if h[i] < l[i - 2] and (l[i - 2] - h[i]) >= fvg_min_atr * atr[i]:
-        bear_zones.append((h[i], l[i - 2], i))
+    # Collect all FVG zones up to current bar
+    for j in range(start, i + 1):
+        if l[j] > h[j - 2] and (l[j] - h[j - 2]) >= fvg_min_atr * atr[j]:
+            bull_zones.append((h[j - 2], l[j], j))
+        if h[j] < l[j - 2] and (l[j - 2] - h[j]) >= fvg_min_atr * atr[j]:
+            bear_zones.append((h[j], l[j - 2], j))
+    # Filter zones to last fvg_lookback bars
     bull_zones = [z for z in bull_zones if i - z[2] <= fvg_lookback]
     bear_zones = [z for z in bear_zones if i - z[2] <= fvg_lookback]
 
