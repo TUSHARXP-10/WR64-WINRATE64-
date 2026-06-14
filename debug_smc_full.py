@@ -35,6 +35,8 @@ SL_ATR = 1.0
 TP_ATR = 2.0
 FVG_MIN_ATR = 0.0
 SWEEP_LOOKBACK = 0
+TOTAL_CAPITAL = 5000.0  # Back to $5000
+RISK_PER_TRADE = 0.01  # 1% risk
 
 def get_historical_data(symbol, interval, lookback):
     all_data = []
