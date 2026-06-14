@@ -37,7 +37,7 @@ client.WEBSITE_URL = 'https://testnet.binance.vision'
 
 # Configuration
 SYMBOLS = ["BTCUSDT", "BNBUSDT", "ETHUSDT"]
-INTERVAL = Client.KLINE_INTERVAL_4HOUR  # SMC works better on higher timeframes
+INTERVAL = Client.KLINE_INTERVAL_1HOUR  # Changed to 1H (way more signals!)
 LEVERAGE = 20
 RISK_PER_TRADE = 0.02  # 2% risk per trade (since $100 is small)
 CHECK_INTERVAL = 300  # Check every 5 minutes
@@ -169,7 +169,7 @@ def get_historical_data(symbol: str, interval: str, lookback: int = 1000) -> pd.
 
 
 def generate_smc_signal(df: pd.DataFrame) -> dict:
-    """Generate trading signal using SMC/FVG/Candlestick strategy"""
+    """Generate trading signal using SMC/FVG/Candlestick strategy - MORE LENIENT!"""
     o = df["open"].values
     h = df["high"].values
     l = df["low"].values
@@ -182,7 +182,7 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
 
     bull_zones = []  # (bottom, top, created_idx)
     bear_zones = []
-    fvg_lookback = 30
+    fvg_lookback = 40  # Increased to 40 bars
     fvg_min_atr = 0.0
     sweep_lookback = 0
 
@@ -190,44 +190,70 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
     if n < start + 1:
         return {"signal": "hold", "stop_loss": None, "take_profit": None}
 
-    i = n - 1  # Current candle (latest)
-
-    # Collect all FVG zones up to current bar
-    for j in range(start, i + 1):
-        if l[j] > h[j - 2] and (l[j] - h[j - 2]) >= fvg_min_atr * atr[j]:
-            bull_zones.append((h[j - 2], l[j], j))
-        if h[j] < l[j - 2] and (l[j - 2] - h[j]) >= fvg_min_atr * atr[j]:
-            bear_zones.append((h[j], l[j - 2], j))
-    # Filter zones to last fvg_lookback bars
+    # Collect all FVG zones
+    for j in range(start, n):
+        if l[j] > h[j-2] and (l[j] - h[j-2]) >= fvg_min_atr * atr[j]:
+            bull_zones.append((h[j-2], l[j], j))
+        if h[j] < l[j-2] and (l[j-2] - h[j]) >= fvg_min_atr * atr[j]:
+            bear_zones.append((h[j], l[j-2], j))
+    # Filter old zones
+    i = n - 1
     bull_zones = [z for z in bull_zones if i - z[2] <= fvg_lookback]
     bear_zones = [z for z in bear_zones if i - z[2] <= fvg_lookback]
 
     bull_bias = ema_fast[i] > ema_slow[i]
     bear_bias = ema_fast[i] < ema_slow[i]
 
-    in_bull_zone = any(z[0] <= c[i] <= z[1] for z in bull_zones)
-    in_bear_zone = any(z[0] <= c[i] <= z[1] for z in bear_zones)
+    # Check if price is in ANY FVG zone (check high/low too, not just close)
+    in_bull_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in bull_zones)
+    in_bear_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in bear_zones)
 
-    bull_pattern = (_is_hammer(o, h, l, c, i) or
-                    _is_bullish_engulfing(o, h, l, c, i) or
-                    _is_three_white_soldiers(o, h, l, c, i))
-    bear_pattern = (_is_shooting_star(o, h, l, c, i) or
-                    _is_bearish_engulfing(o, h, l, c, i) or
-                    _is_three_black_crows(o, h, l, c, i))
+    # More lenient bull/bear patterns (check last 3 bars!)
+    bull_pattern = False
+    bear_pattern = False
+    for offset in range(0, 3):
+        k = i - offset
+        if k < 2:
+            continue
+        
+        # Lenient hammer
+        body_size = abs(c[k] - o[k])
+        total_range = h[k] - l[k]
+        lower_wick = min(o[k], c[k]) - l[k]
+        upper_wick = h[k] - max(o[k], c[k])
+        if total_range > 0 and lower_wick >= body_size * 1.2 and upper_wick <= body_size * 0.5:
+            bull_pattern = True
+            break
+        
+        # Lenient shooting star
+        if total_range > 0 and upper_wick >= body_size * 1.2 and lower_wick <= body_size * 0.5:
+            bear_pattern = True
+            break
+        
+        # Lenient engulfing
+        if k >= 1:
+            # Bullish engulfing
+            if c[k] > o[k] and c[k-1] < o[k-1] and o[k] <= c[k-1] and c[k] >= o[k-1]:
+                bull_pattern = True
+                break
+            # Bearish engulfing
+            if c[k] < o[k] and c[k-1] > o[k-1] and o[k] >= c[k-1] and c[k] <= o[k-1]:
+                bear_pattern = True
+                break
 
     swept_low = swept_high = True
     if sweep_lookback > 0:
-        swept_low = l[i] < np.min(l[i - sweep_lookback:i])
-        swept_high = h[i] > np.max(h[i - sweep_lookback:i])
+        swept_low = l[i] < np.min(l[i-sweep_lookback:i])
+        swept_high = h[i] > np.max(h[i-sweep_lookback:i])
 
     signal = {"signal": "hold", "stop_loss": None, "take_profit": None}
     sl_atr = 1.0
-    tp_atr = 2.5
+    tp_atr = 2.0  # Tighter TP for more wins
 
     if bull_bias and in_bull_zone and bull_pattern and swept_low:
         signal["signal"] = "long"
         entry = c[i]
-        stop_loss = min(l[i], l[i - 1]) - 0.1 * atr[i]
+        stop_loss = min(l[i], l[i-1]) - 0.1 * atr[i]
         if stop_loss >= entry:
             stop_loss = entry - sl_atr * atr[i]
         signal["stop_loss"] = stop_loss
@@ -235,7 +261,7 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
     elif bear_bias and in_bear_zone and bear_pattern and swept_high:
         signal["signal"] = "short"
         entry = c[i]
-        stop_loss = max(h[i], h[i - 1]) + 0.1 * atr[i]
+        stop_loss = max(h[i], h[i-1]) + 0.1 * atr[i]
         if stop_loss <= entry:
             stop_loss = entry + sl_atr * atr[i]
         signal["stop_loss"] = stop_loss
