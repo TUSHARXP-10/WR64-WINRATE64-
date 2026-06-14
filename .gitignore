@@ -1,6 +1,9 @@
 # Virtual environment
 venv/
 
+# Environment variables (keep API keys secret!)
+.env
+
 # Python
 __pycache__/
 *.py[cod]
