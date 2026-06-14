@@ -6,6 +6,7 @@ Includes all bug fixes: data chronology, order precision, connectivity
 import os
 import time
 import logging
+import argparse
 from datetime import datetime
 from dotenv import load_dotenv
 from binance.client import Client
@@ -380,6 +381,11 @@ def open_position(symbol: str, side: str, stop_loss: float, take_profit: float):
 
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description="SMC Live Trader")
+    parser.add_argument("--one-check", action="store_true", help="Run one market check and exit")
+    args = parser.parse_args()
+
     logger.info("="*64)
     logger.info("SMC Live Trader - Version 3 Starting")
     logger.info(f"Symbols: {SYMBOLS}, Interval: {INTERVAL}, Leverage: {LEVERAGE}x")
@@ -398,45 +404,52 @@ def main():
     open_positions = get_open_positions()
     logger.info(f"Loaded {len(open_positions)} open positions")
 
+    def run_market_check():
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        logger.info(f"\n=== Market Check @ {now} ===")
+
+        # Refresh open positions
+        open_positions = get_open_positions()
+
+        for symbol in SYMBOLS:
+            logger.info(f"--- {symbol} ---")
+
+            # Get historical data
+            df = get_historical_data(symbol, INTERVAL, 1000)
+            if len(df) < 300:
+                logger.warning(f"Not enough data for {symbol}")
+                continue
+
+            # Generate signal
+            signal = generate_smc_signal(df)
+
+            # Check current position
+            current_pos = open_positions.get(symbol)
+
+            if current_pos:
+                logger.info(f"Current position: {current_pos['side']} @ {current_pos['entry_price']}, PnL: ${current_pos['unrealized_pnl']:.2f}")
+                # Check if we need to close (opposite signal)
+                if (current_pos['side'] == 'long' and signal['signal'] == 'short') or \
+                   (current_pos['side'] == 'short' and signal['signal'] == 'long'):
+                    logger.info(f"Opposite signal detected, closing position for {symbol}")
+                    close_position(symbol)
+            else:
+                logger.info("No current position")
+                # Open new position if we have a signal
+                if signal['signal'] in ['long', 'short']:
+                    logger.info(f"Signal: {signal['signal']}, SL: {signal['stop_loss']:.2f}, TP: {signal['take_profit']:.2f}")
+                    open_position(symbol, signal['signal'], signal['stop_loss'], signal['take_profit'])
+                else:
+                    logger.info("No trading signal")
+
+    if args.one_check:
+        run_market_check()
+        logger.info("One check complete, exiting.")
+        return
+
     while True:
         try:
-            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            logger.info(f"\n=== Market Check @ {now} ===")
-
-            # Refresh open positions
-            open_positions = get_open_positions()
-
-            for symbol in SYMBOLS:
-                logger.info(f"--- {symbol} ---")
-
-                # Get historical data
-                df = get_historical_data(symbol, INTERVAL, 1000)
-                if len(df) < 300:
-                    logger.warning(f"Not enough data for {symbol}")
-                    continue
-
-                # Generate signal
-                signal = generate_smc_signal(df)
-
-                # Check current position
-                current_pos = open_positions.get(symbol)
-
-                if current_pos:
-                    logger.info(f"Current position: {current_pos['side']} @ {current_pos['entry_price']}, PnL: ${current_pos['unrealized_pnl']:.2f}")
-                    # Check if we need to close (opposite signal)
-                    if (current_pos['side'] == 'long' and signal['signal'] == 'short') or \
-                       (current_pos['side'] == 'short' and signal['signal'] == 'long'):
-                        logger.info(f"Opposite signal detected, closing position for {symbol}")
-                        close_position(symbol)
-                else:
-                    logger.info("No current position")
-                    # Open new position if we have a signal
-                    if signal['signal'] in ['long', 'short']:
-                        logger.info(f"Signal: {signal['signal']}, SL: {signal['stop_loss']:.2f}, TP: {signal['take_profit']:.2f}")
-                        open_position(symbol, signal['signal'], signal['stop_loss'], signal['take_profit'])
-                    else:
-                        logger.info("No trading signal")
-
+            run_market_check()
             # Sleep until next check
             logger.info(f"\nWaiting {CHECK_INTERVAL} seconds until next check...")
             time.sleep(CHECK_INTERVAL)
