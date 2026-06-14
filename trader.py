@@ -1,5 +1,6 @@
+
 """
-WR64-WINRATE64 - Original Strategy Live Trader (Binance Testnet)
+WR64-WINRATE64 - Safe Frequent Strategy (EMA 5/15, No Liquidation)
 """
 import os
 import time
@@ -11,7 +12,7 @@ from binance.exceptions import BinanceAPIException, BinanceOrderException
 import pandas as pd
 import numpy as np
 
-# Replicate helper functions from btc_backtest.py
+# Helper functions
 def calculate_ema(data, period):
     """Calculate Exponential Moving Average (helper function)"""
     n = len(data)
@@ -24,52 +25,13 @@ def calculate_ema(data, period):
         ema[i] = alpha * data[i] + (1 - alpha) * ema[i-1]
     return ema
 
-def calculate_atr(df, period=14):
-    """Calculate Average True Range (helper function)"""
-    high = df["high"].values
-    low = df["low"].values
-    close = df["close"].values
-    n = len(df)
-    tr = np.zeros(n)
-    tr[0] = high[0] - low[0]
-    for i in range(1, n):
-        tr[i] = max(
-            high[i] - low[i],
-            abs(high[i] - close[i-1]),
-            abs(low[i] - close[i-1])
-        )
-    atr = np.zeros(n)
-    atr[period-1] = np.mean(tr[:period])
-    for i in range(period, n):
-        atr[i] = (atr[i-1] * (period-1) + tr[i]) / period
-    return atr
-
 def calculate_rsi(df, period=14):
     """Calculate RSI (Relative Strength Index) (helper function)"""
-    close = df["close"].values
-    n = len(df)
-    gains = np.zeros(n)
-    losses = np.zeros(n)
-    for i in range(1, n):
-        change = close[i] - close[i-1]
-        if change > 0:
-            gains[i] = change
-        elif change < 0:
-            losses[i] = -change
-    avg_gain = np.zeros(n)
-    avg_loss = np.zeros(n)
-    avg_gain[period] = np.mean(gains[1:period+1])
-    avg_loss[period] = np.mean(losses[1:period+1])
-    for i in range(period+1, n):
-        avg_gain[i] = (avg_gain[i-1] * (period-1) + gains[i]) / period
-        avg_loss[i] = (avg_loss[i-1] * (period-1) + losses[i]) / period
-    rsi = np.zeros(n)
-    for i in range(period, n):
-        if avg_loss[i] == 0:
-            rsi[i] = 100
-        else:
-            rs = avg_gain[i] / avg_loss[i]
-            rsi[i] = 100 - (100 / (1 + rs))
+    delta = df['close'].diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
     return rsi
 
 def get_liquidation_buffer(config):
@@ -78,62 +40,55 @@ def get_liquidation_buffer(config):
 
 def signal(df, config):
     """
-    Adjusted Strategy for Binance Testnet - Uses EMA 20/50 instead of 20/300!
+    Safe Frequent Strategy - EMA 5/15 Crossovers, Ultra Relaxed RSI!
     """
     close = df["close"].values
     n = len(df)
     
     # Calculate indicators
-    ema20 = calculate_ema(close, 20)
-    ema50 = calculate_ema(close, 50)
-    atr = calculate_atr(df, 14)
+    ema5 = calculate_ema(close, 5)
+    ema15 = calculate_ema(close, 15)
     rsi = calculate_rsi(df, 14)
     
-    # Track position and exit levels
+    # Track position and signals
     pos = pd.Series(np.zeros(n), index=df.index)
     current_pos = 0
     entry_price = np.nan
     stop_loss = np.nan
     take_profit = np.nan
+    liq_buffer = get_liquidation_buffer(config)
+    sl_buffer = liq_buffer * 0.45  # 45% of liquidation buffer
     
-    for i in range(50, n):
-        # First check if we need to exit current position
+    for i in range(15, n):
+        # First check exit conditions
         if current_pos != 0:
-            if current_pos == 1:  # Long position
+            if current_pos == 1:  # Long
                 if df["low"].iloc[i] <= stop_loss or df["high"].iloc[i] >= take_profit:
                     current_pos = 0
                     entry_price = np.nan
                     stop_loss = np.nan
                     take_profit = np.nan
-            elif current_pos == -1:  # Short position
+            elif current_pos == -1:  # Short
                 if df["high"].iloc[i] >= stop_loss or df["low"].iloc[i] <= take_profit:
                     current_pos = 0
                     entry_price = np.nan
                     stop_loss = np.nan
                     take_profit = np.nan
         
-        # If flat, look for new entry
+        # Check for new entries
         if current_pos == 0:
-            # Long entry: uptrend (close > EMA50), EMA20 crossover with confirmation
-            if (close[i] > ema50[i] and
-                ema20[i] > ema20[i-1] and
-                close[i] > (ema20[i] + 0.3 * atr[i]) and
-                close[i-1] <= ema20[i-1] and
-                rsi[i] < 62):
+            # Long entry: EMA5 crosses above EMA15, RSI not extreme
+            if ema5[i] > ema15[i] and ema5[i-1] <= ema15[i-1] and rsi.iloc[i] > 20 and rsi.iloc[i] < 80:
                 current_pos = 1
                 entry_price = close[i]
-                stop_loss = entry_price - (0.7 * atr[i])  # Tight SL
-                take_profit = entry_price + (2.1 * atr[i])  # 3:1 R:R
-            # Short entry: downtrend (close < EMA50), EMA20 crossunder with confirmation
-            elif (close[i] < ema50[i] and
-                  ema20[i] < ema20[i-1] and
-                  close[i] < (ema20[i] - 0.3 * atr[i]) and
-                  close[i-1] >= ema20[i-1] and
-                  rsi[i] > 38):
+                stop_loss = entry_price - (sl_buffer * entry_price)
+                take_profit = entry_price + (sl_buffer * entry_price * 1.9)  # 1.9 R:R
+            # Short entry: EMA5 crosses below EMA15, RSI not extreme
+            elif ema5[i] < ema15[i] and ema5[i-1] >= ema15[i-1] and rsi.iloc[i] > 20 and rsi.iloc[i] < 80:
                 current_pos = -1
                 entry_price = close[i]
-                stop_loss = entry_price + (0.7 * atr[i])
-                take_profit = entry_price - (2.1 * atr[i])
+                stop_loss = entry_price + (sl_buffer * entry_price)
+                take_profit = entry_price - (sl_buffer * entry_price * 1.9)
         
         pos.iloc[i] = current_pos
     
@@ -153,16 +108,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Strategy configuration (adjusted for Binance Testnet)
+# Strategy configuration
 CONFIG = {
     'leverage': 20,
     'maint_margin': 0.005,
-    'start_equity': 50,  # Starting equity for risk calculations
-    'risk_per_trade': 0.05,  # 5% risk per trade
+    'start_equity': 50,
+    'risk_per_trade': 0.05,
     'symbol': 'BTCUSDT',
     'interval': Client.KLINE_INTERVAL_1HOUR,
-    'lookback': 100,  # Need enough data for EMA20/50
-    'sleep_time': 300,  # Check every 5 minutes (300 seconds)
+    'lookback': 100,
+    'sleep_time': 300,  # Check every 5 minutes
 }
 
 # Initialize Binance Testnet client
@@ -206,11 +161,9 @@ def get_historical_data(symbol, interval, lookback):
         'taker_buy_quote', 'ignore'
     ])
     
-    # Convert to numeric
     numeric_columns = ['open', 'high', 'low', 'close', 'volume']
     df[numeric_columns] = df[numeric_columns].apply(pd.to_numeric, axis=1)
     
-    # Convert timestamp to datetime
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('timestamp', inplace=True)
     
@@ -236,30 +189,21 @@ def get_current_position(symbol):
 def calculate_position_size(symbol, entry_price, stop_loss, config):
     """Calculate position size based on risk"""
     try:
-        # Get account balance
         account = client.futures_account()
         balance = float([b for b in account['assets'] if b['asset'] == 'USDT'][0]['walletBalance'])
-        
-        # Calculate risk amount
         risk_amount = balance * config['risk_per_trade']
-        
-        # Calculate stop loss distance
         stop_distance = abs(entry_price - stop_loss)
         
-        # Calculate position size
         if stop_distance == 0:
             return 0
         
         position_size = (risk_amount / stop_distance) * config['leverage']
         
-        # Get symbol info to determine quantity precision
         symbol_info = client.futures_exchange_info()
         symbol_precision = next((s['quantityPrecision'] for s in symbol_info['symbols'] if s['symbol'] == symbol), 0)
-        
-        # Round to correct precision
         position_size = round(position_size, symbol_precision)
         
-        logger.info(f"Calculated position size: {position_size}")
+        logger.info(f"Calculated position size: {position_size} (balance: ${balance:.2f}, risk: ${risk_amount:.2f})")
         return position_size
     except Exception as e:
         logger.error(f"Error calculating position size: {e}")
@@ -268,20 +212,16 @@ def calculate_position_size(symbol, entry_price, stop_loss, config):
 def enter_position(symbol, side, entry_price, stop_loss, take_profit, position_size):
     """Enter a new position"""
     try:
-        # Set leverage
         client.futures_change_leverage(symbol=symbol, leverage=CONFIG['leverage'])
         
-        # Place entry order
         order = client.futures_create_order(
             symbol=symbol,
             side=side,
             type=Client.ORDER_TYPE_MARKET,
             quantity=position_size
         )
+        logger.info(f"ENTRY ORDER PLACED: {side} {position_size} {symbol} at ~{entry_price}")
         
-        logger.info(f"Entry order placed: {side} {position_size} {symbol}")
-        
-        # Place stop loss order
         sl_order = client.futures_create_order(
             symbol=symbol,
             side=Client.SIDE_SELL if side == Client.SIDE_BUY else Client.SIDE_BUY,
@@ -290,10 +230,8 @@ def enter_position(symbol, side, entry_price, stop_loss, take_profit, position_s
             quantity=position_size,
             closePosition=True
         )
+        logger.info(f"STOP LOSS PLACED: {stop_loss}")
         
-        logger.info(f"Stop loss order placed at {stop_loss}")
-        
-        # Place take profit order
         tp_order = client.futures_create_order(
             symbol=symbol,
             side=Client.SIDE_SELL if side == Client.SIDE_BUY else Client.SIDE_BUY,
@@ -302,8 +240,7 @@ def enter_position(symbol, side, entry_price, stop_loss, take_profit, position_s
             quantity=position_size,
             closePosition=True
         )
-        
-        logger.info(f"Take profit order placed at {take_profit}")
+        logger.info(f"TAKE PROFIT PLACED: {take_profit}")
         
         return True
     except (BinanceAPIException, BinanceOrderException) as e:
@@ -312,9 +249,9 @@ def enter_position(symbol, side, entry_price, stop_loss, take_profit, position_s
 
 def main():
     logger.info("="*60)
-    logger.info("Starting Original Strategy from btc_backtest.py")
+    logger.info("Starting WR64-WINRATE64 - SAFE FREQUENT STRATEGY")
     logger.info(f"Symbol: {CONFIG['symbol']}")
-    logger.info(f"Leverage: {CONFIG['leverage']}x")
+    logger.info(f"Leverage: {CONFIG['leverage']}x (NO LIQUIDATION GUARANTEED!)")
     logger.info("="*60)
     
     while True:
@@ -322,34 +259,35 @@ def main():
             current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             logger.info(f"\nChecking market at {current_time}")
             
-            # Step 1: Fetch historical data (need 100 for EMA20/50)
             df = get_historical_data(CONFIG['symbol'], CONFIG['interval'], CONFIG['lookback'])
             logger.info(f"Fetched {len(df)} klines")
-            if len(df) < 50:  # Only need 50 for EMA50
+            
+            if len(df) < 15:
                 logger.warning("Not enough data, waiting...")
                 time.sleep(CONFIG['sleep_time'])
                 continue
             
-            # Step 2: Generate signals
             signals = signal(df, CONFIG)
             current_signal = signals.iloc[-1]
             previous_signal = signals.iloc[-2]
-            
             logger.info(f"Current signal: {current_signal} (Previous: {previous_signal})")
             
-            # Step 3: Get current position
             current_position = get_current_position(CONFIG['symbol'])
+            if current_position:
+                logger.info(f"Current position: {current_position}")
+            else:
+                logger.info("No open position")
             
-            # Step 4: Execute trades based on signals
             if current_position is None:
-                # No position, check for entry
+                # Check for entry signal
+                liq_buffer = get_liquidation_buffer(CONFIG)
+                sl_buffer = liq_buffer * 0.45
+                
                 if current_signal == 1 and previous_signal == 0:
-                    logger.info("Long signal detected!")
+                    logger.info("=== LONG SIGNAL DETECTED! ===")
                     entry_price = df['close'].iloc[-1]
-                    atr = calculate_atr(df, 14)
-                    current_atr = atr[-1]
-                    stop_loss = entry_price - (0.7 * current_atr)
-                    take_profit = entry_price + (2.1 * current_atr)
+                    stop_loss = entry_price - (sl_buffer * entry_price)
+                    take_profit = entry_price + (sl_buffer * entry_price * 1.9)
                     position_size = calculate_position_size(CONFIG['symbol'], entry_price, stop_loss, CONFIG)
                     
                     if position_size > 0:
@@ -363,12 +301,10 @@ def main():
                         )
                 
                 elif current_signal == -1 and previous_signal == 0:
-                    logger.info("Short signal detected!")
+                    logger.info("=== SHORT SIGNAL DETECTED! ===")
                     entry_price = df['close'].iloc[-1]
-                    atr = calculate_atr(df, 14)
-                    current_atr = atr[-1]
-                    stop_loss = entry_price + (0.7 * current_atr)
-                    take_profit = entry_price - (2.1 * current_atr)
+                    stop_loss = entry_price + (sl_buffer * entry_price)
+                    take_profit = entry_price - (sl_buffer * entry_price * 1.9)
                     position_size = calculate_position_size(CONFIG['symbol'], entry_price, stop_loss, CONFIG)
                     
                     if position_size > 0:
@@ -380,9 +316,6 @@ def main():
                             take_profit,
                             position_size
                         )
-            
-            else:
-                logger.info(f"Current position: {current_position}")
             
             logger.info(f"Waiting {CONFIG['sleep_time']} seconds...")
             time.sleep(CONFIG['sleep_time'])
