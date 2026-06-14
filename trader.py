@@ -113,7 +113,7 @@ CONFIG = {
     'leverage': 20,
     'maint_margin': 0.005,
     'start_equity': 50,
-    'risk_per_trade': 0.05,
+    'risk_per_trade': 0.02,  # 2% risk per trade for safer margin
     'symbol': 'BTCUSDT',
     'interval': Client.KLINE_INTERVAL_1HOUR,
     'lookback': 100,
@@ -187,7 +187,7 @@ def get_current_position(symbol):
         return None
 
 def calculate_position_size(symbol, entry_price, stop_loss, config):
-    """Calculate position size based on risk"""
+    """Calculate position size based on risk, with hard margin cap"""
     try:
         account = client.futures_account()
         balance = float([b for b in account['assets'] if b['asset'] == 'USDT'][0]['walletBalance'])
@@ -199,11 +199,17 @@ def calculate_position_size(symbol, entry_price, stop_loss, config):
         
         position_size = (risk_amount / stop_distance) * config['leverage']
         
+        # Calculate maximum possible position size (90% of available margin to avoid margin call)
+        max_possible_size = (balance * config['leverage'] / entry_price) * 0.9
+        
+        # Cap position size at max possible
+        position_size = min(position_size, max_possible_size)
+        
         symbol_info = client.futures_exchange_info()
         symbol_precision = next((s['quantityPrecision'] for s in symbol_info['symbols'] if s['symbol'] == symbol), 0)
         position_size = round(position_size, symbol_precision)
         
-        logger.info(f"Calculated position size: {position_size} (balance: ${balance:.2f}, risk: ${risk_amount:.2f})")
+        logger.info(f"Calculated position size: {position_size} (balance: ${balance:.2f}, risk: ${risk_amount:.2f}, max: {max_possible_size:.3f})")
         return position_size
     except Exception as e:
         logger.error(f"Error calculating position size: {e}")
