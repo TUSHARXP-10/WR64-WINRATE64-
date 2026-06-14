@@ -117,7 +117,7 @@ CONFIG = {
     'symbol': 'BTCUSDT',
     'interval': Client.KLINE_INTERVAL_1HOUR,
     'lookback': 100,
-    'sleep_time': 300,  # Check every 5 minutes
+    'sleep_time': 60,  # Check every 1 minute for faster testing
 }
 
 # Initialize Binance Testnet client
