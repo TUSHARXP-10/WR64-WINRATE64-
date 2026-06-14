@@ -223,15 +223,15 @@ def enter_position(symbol, side, entry_price, stop_loss, take_profit, position_s
         order = client.futures_create_order(
             symbol=symbol,
             side=side,
-            type=Client.ORDER_TYPE_MARKET,
+            type='MARKET',
             quantity=position_size
         )
         logger.info(f"ENTRY ORDER PLACED: {side} {position_size} {symbol} at ~{entry_price}")
         
         sl_order = client.futures_create_order(
             symbol=symbol,
-            side=Client.SIDE_SELL if side == Client.SIDE_BUY else Client.SIDE_BUY,
-            type=Client.ORDER_TYPE_STOP_MARKET,
+            side='SELL' if side == Client.SIDE_BUY else 'BUY',
+            type='STOP_MARKET',
             stopPrice=stop_loss,
             quantity=position_size,
             closePosition=True
@@ -240,8 +240,8 @@ def enter_position(symbol, side, entry_price, stop_loss, take_profit, position_s
         
         tp_order = client.futures_create_order(
             symbol=symbol,
-            side=Client.SIDE_SELL if side == Client.SIDE_BUY else Client.SIDE_BUY,
-            type=Client.ORDER_TYPE_TAKE_PROFIT_MARKET,
+            side='SELL' if side == Client.SIDE_BUY else 'BUY',
+            type='TAKE_PROFIT_MARKET',
             stopPrice=take_profit,
             quantity=position_size,
             closePosition=True
