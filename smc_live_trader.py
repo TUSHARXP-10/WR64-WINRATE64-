@@ -278,14 +278,10 @@ def get_account_balance() -> float:
 
 
 def calculate_position_size(symbol: str, entry_price: float, stop_loss: float) -> float:
-    """Calculate position size based on fixed $100 capital and risk"""
-    risk_amount = TOTAL_CAPITAL * RISK_PER_TRADE
-    stop_distance = abs(entry_price - stop_loss)
-    if stop_distance == 0:
-        return 0.0
-
-    # Calculate position size (units of base asset)
-    position_size = (risk_amount / stop_distance) / LEVERAGE
+    """Calculate position size based on fixed $100 per trade"""
+    # Fixed $100 per trade (not using leverage for this calculation)
+    position_size_usd = 100.0
+    position_size = position_size_usd / entry_price
 
     # Round to correct precision
     return round_quantity(symbol, position_size)
@@ -376,13 +372,16 @@ def open_position(symbol: str, side: str, stop_loss: float, take_profit: float):
             closePosition=True
         )
 
-        logger.info(f"Opened {side} position for {symbol} at {entry_price}, SL={stop_loss}, TP={take_profit}")
+        # Calculate position size in USD
+        position_size_usd = quantity * entry_price
+        logger.info(f"Opened {side} position for {symbol}: {quantity} contracts, ${position_size_usd:.2f} at {entry_price}, SL={stop_loss}, TP={take_profit}")
         open_positions[symbol] = {
             'side': side,
             'entry_price': entry_price,
             'stop_loss': stop_loss,
             'take_profit': take_profit,
-            'amount': quantity
+            'amount': quantity,
+            'position_size_usd': position_size_usd
         }
     except Exception as e:
         logger.error(f"Error opening position for {symbol}: {e}")
