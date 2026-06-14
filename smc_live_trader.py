@@ -37,10 +37,10 @@ client.WEBSITE_URL = 'https://testnet.binance.vision'
 
 # Configuration
 SYMBOLS = ["BTCUSDT", "BNBUSDT", "ETHUSDT"]
-INTERVAL = Client.KLINE_INTERVAL_1HOUR  # Changed to 1H (way more signals!)
+INTERVAL = Client.KLINE_INTERVAL_5MINUTE  # Changed to 5min for way more signals!
 LEVERAGE = 20
 RISK_PER_TRADE = 0.01  # 1% risk per trade (original)
-CHECK_INTERVAL = 300  # Check every 5 minutes
+CHECK_INTERVAL = 60  # Check every minute!
 TOTAL_CAPITAL = 5000.0  # Fixed $5000 total capital (back to original)
 
 # Global state to track open positions
@@ -169,7 +169,7 @@ def get_historical_data(symbol: str, interval: str, lookback: int = 1000) -> pd.
 
 
 def generate_smc_signal(df: pd.DataFrame) -> dict:
-    """Generate trading signal using SMC/FVG/Candlestick strategy - MORE LENIENT!"""
+    """Generate trading signal using SMC/FVG/Candlestick strategy - SUPER SIMPLE!"""
     o = df["open"].values
     h = df["high"].values
     l = df["low"].values
@@ -208,39 +208,9 @@ def generate_smc_signal(df: pd.DataFrame) -> dict:
     in_bull_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in bull_zones)
     in_bear_zone = any(z[0] <= h[i] and z[1] >= l[i] for z in bear_zones)
 
-    # Super lenient bull/bear patterns (check last 5 bars!)
-    bull_pattern = False
-    bear_pattern = False
-    for offset in range(0, 5):
-        k = i - offset
-        if k < 1:
-            continue
-        
-        # Super lenient hammer/shooting star
-        body_size = abs(c[k] - o[k])
-        total_range = h[k] - l[k]
-        if total_range > 0:
-            lower_wick = min(o[k], c[k]) - l[k]
-            upper_wick = h[k] - max(o[k], c[k])
-            # Bullish pattern (more lower wick)
-            if lower_wick >= body_size * 0.8:
-                bull_pattern = True
-                break
-            # Bearish pattern (more upper wick)
-            if upper_wick >= body_size * 0.8:
-                bear_pattern = True
-                break
-        
-        # Super lenient engulfing
-        if k >= 1:
-            # Bullish engulfing (any close > open, previous close < open)
-            if c[k] > o[k] and c[k-1] < o[k-1]:
-                bull_pattern = True
-                break
-            # Bearish engulfing (any close < open, previous close > open)
-            if c[k] < o[k] and c[k-1] > o[k-1]:
-                bear_pattern = True
-                break
+    # SUPER SIMPLE PATTERN CHECK: Bullish = close > open, Bearish = close < open
+    bull_pattern = c[i] > o[i]
+    bear_pattern = c[i] < o[i]
 
     swept_low = swept_high = True
     if sweep_lookback > 0:
